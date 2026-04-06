@@ -1,0 +1,370 @@
+#!/bin/bash
+
+DIR="$HOME/.llamaorch/config"
+PIDDIR="$HOME/.llamaorch/pids"
+REPO_URL="https://github.com/alasgarovs/llamaorch"
+VERSION="v1.0.1"
+
+# ── Colors ─────────────────────────────────────────────────────────────────────
+RESET="\e[0m"
+YELLOW="\e[38;2;205;144;119m"      # terracotta — primary brand
+GREEN="\e[38;2;100;200;120m"       # status: running / success
+RED="\e[38;2;220;90;90m"           # status: error / fail
+AMBER="\e[38;2;220;170;60m"        # status: warning
+CYAN="\e[38;2;100;190;210m"        # status: info / ports / urls
+WHITE="\e[38;2;220;215;205m"       # primary text
+MUTED="\e[38;2;110;100;90m"        # secondary text / labels
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+port_live()   { lsof -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
+pid_on_port() { lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null | head -1; }
+open_url()    { (xdg-open "$1" &>/dev/null &); }
+hyperlink()   { printf '\e]8;;%s\e\\%s\e]8;;\e\\' "$2" "$1"; }
+
+get_port() { grep -oP '(?<=--(port|p) )\d+|(?<=:)\d+(?=\s|$)|(?<=port=)\d+' "$1" | grep -v '^0$' | head -1; }
+
+pidfile()  { echo "$PIDDIR/$1.pid"; }
+save_pid() { echo "$2" > "$(pidfile "$1")"; }
+get_pid()  { local f="$(pidfile "$1")"; [ -f "$f" ] && cat "$f"; }
+del_pid()  { rm -f "$(pidfile "$1")"; }
+
+wait_port() {
+    local port="$1" i=0
+    while [ $i -lt 20 ]; do
+        port_live "$port" && return 0
+        sleep 1; i=$((i+1)); printf "."
+    done; return 1
+}
+
+load_scripts() {
+    files=("$DIR"/*.sh)
+    [ ! -e "${files[0]}" ] && echo -e "    ${RED}✗ Model config scripts not found in $DIR${RESET}\n" && exit 1
+}
+
+# Pick a model with fzf or numbered menu; sets $selected
+pick_model() {
+    local prompt="$1" pool=("${@:2}")
+    local names=()
+    for f in "${pool[@]}"; do names+=("$(basename "$f" .sh)"); done
+
+    if command -v fzf >/dev/null 2>&1; then
+        selected=$(printf "%s\n" "${names[@]}" | fzf --prompt="$prompt" \
+            --border --height=40% --layout=reverse \
+            --preview "cat $DIR/{}.sh" --preview-window=right:60% \
+            --color=hl:cyan,hl+:green,prompt:yellow)
+        [ -z "$selected" ] && exit 0
+    else
+        echo -e "${MUTED}Models:${RESET}\n"
+        for i in "${!names[@]}"; do
+            local port; port=$(get_port "${pool[$i]}")
+            local info=""; [ -n "$port" ] && info=" ${MUTED}(port $port)${RESET}"
+            echo -e "  ${YELLOW}$((i+1)))${RESET} ${WHITE}${names[$i]}${RESET}$info"
+        done
+        echo; read -rp "Select: " choice
+        if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#pool[@]}" ]; then
+            echo -e "    ${RED}✗ Invalid selection${RESET}"; exit 1
+        fi
+        selected="${names[$((choice-1))]}"
+    fi
+}
+
+# ── Header ─────────────────────────────────────────────────────────────────────
+
+print_header() {
+    clear
+    local cols; cols=$(tput cols 2>/dev/null || echo 80)
+
+    echo
+    echo -e "${YELLOW}    ██╗     ██╗      █████╗ ███╗   ███╗ █████╗     ██████╗ ██████╗  ██████╗██╗  ██╗${RESET}"
+    echo -e "${YELLOW}    ██║     ██║     ██╔══██╗████╗ ████║██╔══██╗   ██╔═══██╗██╔══██╗██╔════╝██║  ██║${RESET}"
+    echo -e "${YELLOW}    ██║     ██║     ███████║██╔████╔██║███████║   ██║   ██║██████╔╝██║     ███████║${RESET}"
+    echo -e "${YELLOW}    ██║     ██║     ██╔══██║██║╚██╔╝██║██╔══██║   ██║   ██║██╔══██╗██║     ██╔══██║${RESET}"
+    echo -e "${YELLOW}    ███████╗███████╗██║  ██║██║ ╚═╝ ██║██║  ██║   ╚██████╔╝██║  ██║╚██████╗██║  ██║${RESET}"
+    echo -e "${YELLOW}    ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝    ╚═════╝ ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝${RESET}"
+    echo
+    echo -e "    ${YELLOW}CLI Orchestrator for llama.cpp${RESET} ${MUTED}• ${CYAN}\e]8;;${REPO_URL}\a\033[4m ${VERSION} \033[0m\e]8;;\a${RESET}"
+    echo
+}
+
+# ── Commands ───────────────────────────────────────────────────────────────────
+
+cmd_list() {
+    print_header; load_scripts
+    echo -e "   ${YELLOW}┌─ Available Models ─────────────────────────────${RESET}\n"
+    for f in "${files[@]}"; do
+        local name port live
+        name=$(basename "$f" .sh); port=$(get_port "$f")
+        live=""; port_live "$port" && live="  ${GREEN}● live${RESET}"
+        echo -e "      ${WHITE}$name${RESET}  ${MUTED}${port:+(port $port)}${RESET}$live \n"
+    done
+    echo -e "   ${YELLOW}└────────────────────────────────────────────────${RESET}\n"
+}
+
+cmd_run() {
+    print_header; load_scripts
+    pick_model "🚀 Start model: " "${files[@]}"
+
+    local port; port=$(get_port "$DIR/$selected.sh")
+
+    if [ -n "$port" ] && port_live "$port"; then
+        local url="http://localhost:$port"
+        echo -e "\n    ${AMBER}⚠  $selected already running on port $port${RESET}"
+        echo -e "       ${CYAN}$(hyperlink "→ $url" "$url") ${RESET}\n"
+        read -rp "    Open in browser? [y/N] " a; [[ "$a" =~ ^[Yy]$ ]] && open_url "$url"
+        exit 0
+    fi
+
+    local log="$PIDDIR/$selected.log"
+    echo -e "\n    ${GREEN}▶  Starting:${RESET} ${WHITE}$selected${RESET}\n"
+    nohup bash "$DIR/$selected.sh" >"$log" 2>&1 &
+    local pid=$!
+
+    sleep 0.3
+    if ! kill -0 "$pid" 2>/dev/null; then
+        echo -e "    ${RED}✗ Failed to start. Check: ${MUTED}$log${RESET}"; exit 1
+    fi
+    save_pid "$selected" "$pid"
+
+    if [ -n "$port" ]; then
+        printf "    ${MUTED}  Waiting for port $port${RESET}"
+        if wait_port "$port"; then
+            local url="http://localhost:$port"
+            echo -e "\n\n    ${GREEN}✓  $selected is running!${RESET}"
+            echo -e "      ${MUTED}Port:${RESET} ${CYAN}$port${RESET}   ${MUTED}PID:${RESET} ${MUTED}$pid${RESET}"
+            echo -e "      ${MUTED}URL: ${RESET} ${CYAN}$(hyperlink "→ $url" "$url") ${RESET}"
+            echo -e "      ${MUTED}Log: ${RESET} ${MUTED}$log${RESET}\n"
+            read -rp "    Open in browser? [y/N] " a; [[ "$a" =~ ^[Yy]$ ]] && open_url "$url"
+        else
+            echo -e "\n\n      ${AMBER}⚠  Port $port didn't open after 20s${RESET}"
+            echo -e "      Still loading? Log: ${MUTED}$log${RESET}"
+        fi
+    else
+        sleep 2
+        if kill -0 "$pid" 2>/dev/null; then
+            echo -e "      ${GREEN}✓  $selected started${RESET} ${MUTED}(PID $pid) — port unknown${RESET}\n  Log: ${MUTED}$log${RESET}"
+        else
+            echo -e "      ${RED}✗  Process exited. Check: ${MUTED}$log${RESET}"
+        fi
+    fi
+    echo
+}
+
+cmd_status() {
+    print_header; load_scripts
+    local run=0 total=0
+    echo -e "   ${YELLOW}┌─ Model Status ─────────────────────────────────${RESET}\n"
+    for f in "${files[@]}"; do
+        local name port; name=$(basename "$f" .sh); port=$(get_port "$f"); total=$((total+1))
+        if [ -z "$port" ]; then
+            echo -e "     ${MUTED} $name (no port detected)${RESET}"; continue
+        fi
+        if port_live "$port"; then
+            run=$((run+1))
+            local pid url; pid=$(pid_on_port "$port"); url="http://localhost:$port"
+            echo -e "     ${GREEN} ${WHITE}$name${RESET}  ${CYAN}port $port${RESET}  ${MUTED}· PID ${pid:-?}${RESET}"
+            echo -e "         ${CYAN}$(hyperlink "→ $url" "$url") ${RESET} \n"
+        else
+            echo -e "     ${MUTED} $name  port $port · stopped${RESET} \n"
+            del_pid "$name"
+        fi
+    done
+    echo -e "   ${YELLOW}└────────────────────────────────────────────────${RESET}"
+    [ "$run" -eq 0 ] \
+        && echo -e "\n    ${MUTED}No models running. Use 'llamaorch run'.${RESET}\n" \
+        || echo -e "\n    ${GREEN}$run${RESET}${WHITE}/$total${RESET} running\n"
+}
+
+cmd_stop() {
+    print_header; load_scripts
+    local running_files=()
+    for f in "${files[@]}"; do
+        local name port pid
+        name=$(basename "$f" .sh); port=$(get_port "$f"); pid=$(get_pid "$name")
+        { [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; } || { [ -n "$port" ] && port_live "$port"; } \
+            && running_files+=("$f") || del_pid "$name"
+    done
+    [ ${#running_files[@]} -eq 0 ] && echo -e "    ${AMBER}⚠  No models running.${RESET}\n" && exit 0
+
+    pick_model "🛑 Stop model: " "${running_files[@]}"
+    local port; port=$(get_port "$DIR/$selected.sh")
+    echo -e "\n    ${AMBER}⏳ Stopping ${WHITE}$selected${RESET}${AMBER}...${RESET}"
+
+    local pid; pid=$(get_pid "$selected")
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && kill "$pid" 2>/dev/null && sleep 1
+
+    if [ -n "$port" ]; then
+        while port_live "$port"; do
+            local fp; fp=$(pid_on_port "$port")
+            [ -n "$fp" ] && kill -9 "$fp" 2>/dev/null && sleep 1 || break
+        done
+    fi
+
+    port_live "$port" \
+        && echo -e "    ${RED}✗  Could not stop $selected (port $port still active)${RESET}\n" \
+        || echo -e "    ${GREEN}✓  $selected stopped${RESET}\n"
+    del_pid "$selected"
+}
+
+cmd_logs() {
+    print_header; load_scripts
+    pick_model "📋 View logs: " "${files[@]}"
+    local log="$PIDDIR/$selected.log"
+    if [ ! -f "$log" ]; then
+        echo -e "    ${AMBER}⚠  No log for $selected yet${RESET}\n"; exit 0
+    fi
+    echo -e "    ${YELLOW}── Logs: $selected ──────────────────────────────${RESET}"
+    echo -e "    ${MUTED}$log  (Ctrl+C to exit)${RESET}\n"
+    tail -f "    $log"
+}
+
+cmd_create() {
+    print_header
+    load_scripts
+
+    local name="$1"
+    if [ -z "$name" ]; then
+        echo -e "    ${RED}✗  Usage: llamaorch create [modelname]${RESET}\n"
+        return
+    fi
+
+    local file="$DIR/$name.sh"
+    if [ -f "$file" ]; then
+        echo -e "    ${RED}✗  Model '$name' already exists${RESET}"; return
+    fi
+
+    local default_conf='#!/bin/bash
+# This is example configuration of llama-server, for more https://github.com/ggml-org/llama.cpp
+
+# llama-server \
+#   -m ~/.llamaorch/models/example-model.gguf \
+#   -ngl 35 \
+#   -c 6144 \
+#   -t 6 \
+#   -b 512 \
+#   --ubatch-size 128 \
+#   --flash-attn off \
+#   --no-mmap \
+#   --cont-batching \
+#   --ignore-eos \
+#   --port 18080 \
+#   --host 0.0.0.0
+'
+
+    echo "$default_conf" > "$file"
+    chmod +x "$file"
+
+    nano "$file"
+    echo -e "\n    ${GREEN}✓  Config saved at: ${CYAN}$file${RESET}\n"
+}
+
+cmd_update() {
+    print_header
+    load_scripts
+
+    local existing_files=("${files[@]}")
+    [ ${#existing_files[@]} -eq 0 ] && echo -e "    ${AMBER}⚠  No models found to edit.${RESET}\n" && return
+
+    pick_model "🛠  Edit model conf: " "${existing_files[@]}"
+
+    local file="$DIR/$selected.sh"
+    if [ ! -f "$file" ]; then
+        echo -e "    ${RED}✗  Config file not found: $file${RESET}"; return
+    fi
+
+    nano "$file"
+    echo -e "\n    ${GREEN}✓  Config saved at: ${CYAN}$file${RESET}\n"
+}
+
+cmd_remove() {
+    print_header
+    load_scripts
+
+    local existing_files=("${files[@]}")
+    [ ${#existing_files[@]} -eq 0 ] && echo -e "${AMBER}⚠  No models found to remove.${RESET}\n" && return
+
+    pick_model "🗑  Remove model: " "${existing_files[@]}"
+
+    local file="$DIR/$selected.sh"
+    local pidfile_path="$PIDDIR/$selected.pid"
+    local logfile="$PIDDIR/$selected.log"
+
+    read -rp "    Are you sure you want to delete '$selected.sh'? [y/N] " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        echo -e "\n    ${AMBER}⚠  Removal cancelled${RESET}\n"
+        return
+    fi
+
+    [ -f "$file" ]        && rm -f "$file"
+    [ -f "$pidfile_path" ] && rm -f "$pidfile_path"
+    [ -f "$logfile" ]     && rm -f "$logfile"
+
+    echo -e "\n    ${GREEN}✓  Model config '${WHITE}$selected.sh${RESET}${GREEN}' removed${RESET}\n"
+}
+
+cmd_help() {
+    print_header
+    echo -e "   ${YELLOW}┌─ Commands ──────────────────────────────────────${RESET} \n"
+    echo -e "      run      · Launch model"
+    echo -e "      stop     · Stop running model"
+    echo -e "      ps       · Show running models"
+    echo -e "      ls       · List all models"
+    echo -e "      log      · Tail model logs"
+    echo -e "      create   · Ceate model config"
+    echo -e "      edit     · Edit model config"
+    echo -e "      rm       · Delete model config"
+    echo -e "\n   ${YELLOW}└────────────────────────────────────────────────${RESET}"
+    echo -e "\n     ${MUTED}Config:${RESET} ${MUTED}$DIR${RESET}"
+    echo -e "     ${MUTED}PIDs/logs:${RESET} ${MUTED}$PIDDIR${RESET}\n"
+}
+
+# ── Entry point ────────────────────────────────────────────────────────────────
+
+cmd="${1:-help}"
+arg="$2"
+
+declare -A cmds=(
+    [run]=cmd_run
+    [stop]=cmd_stop
+    [ps]=cmd_status
+    [ls]=cmd_list
+    [log]=cmd_logs
+    [edit]=cmd_update
+    [rm]=cmd_remove
+    [create]=cmd_create
+    [-h]=cmd_help
+    [help]=cmd_help
+)
+
+usage_error() {
+    local cmd_name="$1"
+    local arg_required="$2"
+    print_header
+    if [ "$arg_required" = "1" ]; then
+        echo -e "    ${RED}✗  '$cmd_name' requires 1 argument${RESET}\n"
+        echo -e "    ${YELLOW}Usage: llamaorch $cmd_name [name]${RESET}\n"
+    else
+        echo -e "    ${RED}✗  '$cmd_name' takes no arguments${RESET}\n"
+        echo -e "    ${YELLOW}Usage: llamaorch $cmd_name${RESET}\n"
+    fi
+    exit 1
+}
+
+if [[ -z "${cmds[$cmd]}" ]]; then
+    print_header
+    echo -e "    ${RED}✗  Unknown command: ${WHITE}$cmd${RESET}\n"
+    echo -e "    ${YELLOW}Use 'llamaorch help' for more info${RESET}\n"
+    exit 1
+fi
+
+case "$cmd" in
+    create)
+        [[ $# -eq 2 ]] && cmd_create "$arg" || usage_error "$cmd" 1
+        ;;
+    help|-h)
+        cmd_help
+        ;;
+    *)
+        [[ $# -eq 1 ]] && "${cmds[$cmd]}" || usage_error "$cmd" 0
+        ;;
+esac

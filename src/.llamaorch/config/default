@@ -1,0 +1,16 @@
+#!/bin/bash
+# This is example cofiguration of llama-server, for more https://github.com/ggml-org/llama.cpp
+
+# llama-server \
+#   -m ~/.llamaorch/models/example-model.gguf \
+#   -ngl 35 \
+#   -c 6144 \
+#   -t 6 \
+#   -b 512 \
+#   --ubatch-size 128 \
+#   --flash-attn off \
+#   --no-mmap \
+#   --cont-batching \
+#   --ignore-eos \
+#   --port 18080 \
+#   --host 0.0.0.0

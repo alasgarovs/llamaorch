@@ -1,0 +1,41 @@
+#!/bin/bash
+set -e
+
+RESET="\e[0m"
+YELLOW="\e[38;2;205;144;119m"
+GREEN="\e[38;2;100;200;120m"
+
+
+echo -e "${GREEN}[*]${RESET} Installing ${YELLOW}LlamaOrch${RESET}..."
+
+INSTALL_DIR="$HOME/.llamaorch"
+BIN_DIR="$HOME/.local/bin"
+TARGET="$BIN_DIR/llamaorch"
+SOURCE_SCRIPT="$INSTALL_DIR/bin/llamaorch"
+
+# Detect shell config file
+SHELL_RC="$HOME/.bashrc"
+[ -n "$ZSH_VERSION" ] && SHELL_RC="$HOME/.zshrc"
+
+# Resolve script location
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Copy files
+mkdir -p "$INSTALL_DIR"
+cp -r "$SCRIPT_DIR/.llamaorch/." "$INSTALL_DIR/"
+
+# Permissions
+chmod +x "$SOURCE_SCRIPT"
+
+# Symlink
+mkdir -p "$BIN_DIR"
+ln -sfn "$SOURCE_SCRIPT" "$TARGET"
+
+# PATH setup
+if ! grep -q '\.local/bin' "$SHELL_RC"; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_RC"
+    echo "[*] Added ~/.local/bin to PATH in $SHELL_RC"
+fi
+
+echo -e "${GREEN}[✓]${RESET} Installation complete!"
+echo -e "    Run: ${YELLOW}llamaorch${RESET}"
