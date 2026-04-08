@@ -289,18 +289,30 @@ cmd_remove() {
     local pidfile_path="$PIDDIR/$selected.pid"
     local logfile="$PIDDIR/$selected.log"
 
+    local port pid
+    port=$(get_port "$file")
+
+    if [ -n "$port" ] && port_live "$port"; then
+        pid=$(pid_on_port "$port")
+        echo -e "\n    ${RED}✖  Cannot remove '${WHITE}$selected.sh${RESET}${RED}'${RESET}"
+        echo -e "    ${AMBER}Model is currently running on port ${port} (PID: ${pid:-?})${RESET}"
+        echo -e "    ${MUTED}Stop it first using 'llamaorch stop'${RESET}\n"
+        return
+    fi
+
     read -rp "    Are you sure you want to delete '$selected.sh'? [y/N] " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         echo -e "\n    ${AMBER}⚠  Removal cancelled${RESET}\n"
         return
     fi
 
-    [ -f "$file" ]        && rm -f "$file"
+    [ -f "$file" ]         && rm -f "$file"
     [ -f "$pidfile_path" ] && rm -f "$pidfile_path"
-    [ -f "$logfile" ]     && rm -f "$logfile"
+    [ -f "$logfile" ]      && rm -f "$logfile"
 
     echo -e "\n    ${GREEN}✓  Model config '${WHITE}$selected.sh${RESET}${GREEN}' removed${RESET}\n"
 }
+
 
 cmd_help() {
     print_header
