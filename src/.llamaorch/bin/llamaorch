@@ -313,7 +313,6 @@ cmd_remove() {
     echo -e "\n    ${GREEN}✓  Model config '${WHITE}$selected.sh${RESET}${GREEN}' removed${RESET}\n"
 }
 
-
 cmd_help() {
     print_header
     echo -e "   ${YELLOW}┌─ Commands ──────────────────────────────────────${RESET} \n"
