@@ -234,20 +234,19 @@ cmd_create() {
     fi
 
     local default_conf='#!/bin/bash
-# This is example configuration of llama-server, for more https://github.com/ggml-org/llama.cpp
+# This is example cofiguration of llama-server, for more https://github.com/ggml-org/llama.cpp
 
 #llama-server \
-#  -m ~/.llamaorch/models/example-model.gguf \
-#  -ngl 35 \
-#  -c 6144 \
-#  -t 6 \
-#  -b 512 \
-#  --ubatch-size 128 \
-#  --flash-attn off \
-#  --no-mmap \
-#  --cont-batching \
-#  --port 18080 \
-#  --host 0.0.0.0
+#	-m ~/.llamaorch/models/example-model.gguf \
+#	-ngl 28 \
+#	-c 6144 \
+#	-t 6 \
+#	-b 192 \
+#	--ubatch-size 64 \
+#	--flash-attn off \
+#	--cont-batching \
+#	--port 18080 \
+#	--host 0.0.0.0
 '
 
     echo "$default_conf" > "$file"
