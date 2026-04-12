@@ -206,6 +206,74 @@ cmd_stop() {
     del_pid "$selected"
 }
 
+cmd_restart() {
+    print_header; load_scripts
+
+    local running_files=()
+    for f in "${files[@]}"; do
+        local name port pid
+        name=$(basename "$f" .sh)
+        port=$(get_port "$f")
+        pid=$(get_pid "$name")
+
+        { [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; } || \
+        { [ -n "$port" ] && port_live "$port"; } \
+            && running_files+=("$f") || del_pid "$name"
+    done
+
+    [ ${#running_files[@]} -eq 0 ] && \
+        echo -e "    ${AMBER}⚠  No models running.${RESET}\n" && exit 0
+
+    pick_model "🔄 Restart model: " "${running_files[@]}"
+
+    local name="$selected"
+    local file="$DIR/$selected.sh"
+    local port; port=$(get_port "$file")
+
+    echo -e "\n    ${AMBER}⏳ Restarting ${WHITE}$name${RESET}${AMBER}...${RESET}"
+
+    local pid; pid=$(get_pid "$name")
+
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && kill "$pid" 2>/dev/null && sleep 1
+
+    if [ -n "$port" ]; then
+        while port_live "$port"; do
+            local fp; fp=$(pid_on_port "$port")
+            [ -n "$fp" ] && kill -9 "$fp" 2>/dev/null && sleep 1 || break
+        done
+    fi
+
+    del_pid "$name"
+
+    local log="$PIDDIR/$name.log"
+    nohup bash "$file" >"$log" 2>&1 &
+    local new_pid=$!
+
+    sleep 0.3
+    if ! kill -0 "$new_pid" 2>/dev/null; then
+        echo -e "    ${RED}✗ Failed to restart. Check: ${MUTED}$log${RESET}"
+        exit 1
+    fi
+
+    save_pid "$name" "$new_pid"
+
+    if [ -n "$port" ]; then
+        printf "    ${MUTED}  Waiting for port $port${RESET}"
+        if wait_port "$port"; then
+            local url="http://localhost:$port"
+            echo -e "\n\n    ${GREEN}✓  $name restarted!${RESET}"
+            echo -e "      ${MUTED}Port:${RESET} ${CYAN}$port${RESET}   ${MUTED}PID:${RESET} ${MUTED}$new_pid${RESET}"
+            echo -e "      ${MUTED}URL: ${RESET} ${CYAN}$(hyperlink "→ $url" "$url") ${RESET}"
+            echo -e "      ${MUTED}Log: ${RESET} ${MUTED}$log${RESET}\n"
+        else
+            echo -e "\n\n      ${AMBER}⚠  Port $port didn't open after 20s${RESET}"
+            echo -e "      Log: ${MUTED}$log${RESET}"
+        fi
+    else
+        echo -e "    ${GREEN}✓  $name restarted (PID $new_pid)${RESET}\n"
+    fi
+}
+
 cmd_logs() {
     print_header; load_scripts
     pick_model "📋 View logs: " "${files[@]}"
@@ -316,6 +384,7 @@ cmd_help() {
     echo -e "   ${YELLOW}┌─ Commands ──────────────────────────────────────${RESET} \n"
     echo -e "      run      · Launch model"
     echo -e "      stop     · Stop running model"
+    echo -e "      restart  · Restart running model"
     echo -e "      ps       · Show running models"
     echo -e "      ls       · List all models"
     echo -e "      log      · Tail model logs"
@@ -335,6 +404,7 @@ arg="$2"
 declare -A cmds=(
     [run]=cmd_run
     [stop]=cmd_stop
+    [restart]=cmd_restart
     [ps]=cmd_status
     [ls]=cmd_list
     [log]=cmd_logs
