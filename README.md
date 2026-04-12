@@ -53,6 +53,7 @@ This installs the `llamaorch` command to `~/.local/bin/llamaorch` and sets up th
 |---------|-------------|
 | `run` | Launch a model with interactive selection |
 | `stop` | Gracefully stop a running model |
+| `restart` | Stop and start a running model automatically |
 | `ps` | Show status of all configured models (ports, PIDs, URLs) |
 | `ls` | List all available model configs |
 | `log` | Tail the log file for a model (`Ctrl+C` to exit) |
@@ -71,18 +72,16 @@ Model configs live in `~/.llamaorch/config/` as individual `.sh` scripts. Each s
 #!/bin/bash
 
 llama-server \
-  -m ~/.llamaorch/models/my-model.gguf \
-  -ngl 35 \
-  -c 6144 \
-  -t 6 \
-  -b 512 \
-  --ubatch-size 128 \
-  --flash-attn off \
-  --no-mmap \
-  --cont-batching \
-  --ignore-eos \
-  --port 18080 \
-  --host 0.0.0.0
+	-m ~/.llamaorch/models/example-model.gguf \
+	-ngl 28 \
+	-c 6144 \
+	-t 6 \
+	-b 192 \
+	--ubatch-size 64 \
+	--flash-attn off \
+	--cont-batching \
+	--port 18080 \
+	--host 0.0.0.0
 ```
 
 > The `--port` flag is required for live status detection. LlamaOrch parses it automatically.
