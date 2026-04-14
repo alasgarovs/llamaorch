@@ -31,7 +31,7 @@ LlamaOrch is simple Bash-based CLI Orchestrator for managing LLMs in llama.cpp s
 
 The first pre-built package is now released. You can find the release [here](https://github.com/alasgarovs/llamaorch/releases)
 
-or quick install with `curl`
+or quick install the latest version with `curl`
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/alasgarovs/llamaorch/main/install | bash
